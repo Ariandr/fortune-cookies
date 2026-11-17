@@ -46,6 +46,7 @@ export function App() {
   const [phase, setPhase] = useState<SceneProps['phase']>(() => fortune ? 'revealed' : 'idle');
   const [selected, setSelected] = useState(5);
   const [webgl, setWebgl] = useState(supportsWebGL);
+  const [sceneReady, setSceneReady] = useState(false);
   const [visible, setVisible] = useState(!document.hidden);
   const [persistent, setPersistent] = useState(dailyStore.persistent);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -74,6 +75,7 @@ export function App() {
     style.setProperty('--paper-width', `${width}px`);
     style.setProperty('--paper-height', `${height}px`);
   }, []);
+  const onReady = useCallback(() => setSceneReady(true), []);
   const onFailure = useCallback(() => {
     reveal.current?.removeAttribute('style');
     setWebgl(false);
@@ -146,7 +148,7 @@ export function App() {
   }, [phase]);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
 
-  const sceneProps: SceneProps = { phase, selected, reducedMotion, visible, onChoose: choose, onReveal, onFailure, onPaperLayout, onCookieLayout, hovered };
+  const sceneProps: SceneProps = { phase, selected, reducedMotion, visible, onChoose: choose, onReveal, onFailure, onReady, onPaperLayout, onCookieLayout, hovered };
   const date = new Intl.DateTimeFormat('en', { month: 'long', day: 'numeric' }).format(new Date());
   const revealed = phase === 'revealed';
   async function copyFortune() {
@@ -191,7 +193,7 @@ export function App() {
             </Suspense>
           </SceneBoundary> : <FallbackScene {...sceneProps} />}
         </div>
-        {webgl && <div className="cookie-target-layer">{Array.from({ length: 10 }, (_, index) => <div
+        {webgl && <div className="cookie-target-layer" aria-hidden={!sceneReady} style={{ visibility: sceneReady ? 'visible' : 'hidden' }}>{Array.from({ length: 10 }, (_, index) => <div
           className="projected-cookie" key={index} ref={(element) => { targets.current[index] = element; }}>
           <CookieTarget index={index} disabled={phase === 'opening'} revealed={revealed} hidden={revealed}
             onChoose={choose} onHover={(value) => setHovered(value ? index : null)} />

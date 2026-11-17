@@ -14,6 +14,6 @@ const portrait = [
 export function cookieLayout(isPortrait: boolean): CookiePosition[] {
   return (isPortrait ? portrait : desktop).map(([x, y, scale, rz], i) => ({
     x, y, scale,
-    rotation: [-0.12 + Math.sin(i * 1.9) * 0.24, -0.08 + Math.cos(i * 2) * 0.32, rz],
+    rotation: [-0.06 + Math.sin(i * 1.9) * 0.31, -0.08 + Math.cos(i * 2) * 0.72, rz],
   }));
 }

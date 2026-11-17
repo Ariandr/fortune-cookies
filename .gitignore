@@ -4,3 +4,7 @@ dist/
 .DS_Store
 coverage/
 *.local
+
+*.blend1
+models/*-export.glb
+models/textures/

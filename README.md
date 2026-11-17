@@ -18,6 +18,7 @@ Open the URL printed by Vite (including `/fortune-cookies/`).
 ```sh
 npm run typecheck
 npm test
+npm run check:model
 npm run build
 npm run preview
 ```
@@ -34,7 +35,9 @@ No account or server is required. Clearing browser storage or changing devices s
 
 ## Rendering and accessibility
 
-The cookie is an original procedural folded wafer with inner and outer walls, matching fracture edges, and a locally generated surface texture. Geometry, materials, and lighting are shared across the ten instances. The paper is a deforming mesh, with readable HTML positioned from its projected coordinates at rest.
+The cookie is an authored Blender/GLB asset modeled from photo references, with two curved wafer wings, a pinched center, thin toasted lips, and a hollow pocket. Original 2K color, roughness, and pore normal maps provide the baked surface. A welded intact mesh and two breakable variants share their geometry and materials across ten instances. The paper remains a deforming mesh with readable HTML positioned from its projected coordinates at rest.
+
+[Inspect the standalone model](https://ariandr.github.io/fortune-cookies/model.html), rotate it, examine its underside, and separate the shells. Editable Blender source, GLB, rendered model studies, and rebuild instructions are in [`models/`](models/README.md).
 
 The Three.js scene is loaded separately from the interface. Pixel density is capped and rendering pauses in hidden tabs. Fonts are self-hosted using Fontsource packages; no external assets or APIs are fetched at runtime.
 
@@ -52,7 +55,7 @@ The bundled collection was chosen to control tone, sentence length, and repetiti
 
 ## Deployment
 
-GitHub Actions runs type checking, collection/draw tests, and the production build. Pushes to `main` then publish `dist` to GitHub Pages; pull requests run verification only.
+GitHub Actions runs type checking, collection/draw tests, model validation, and the production build. Pushes to `main` then publish `dist` to GitHub Pages; pull requests run verification only.
 
 Enable **Settings → Pages → Source: GitHub Actions**. The Vite base is `/fortune-cookies/`, matching the repository name. For another repository or a custom domain, update the base in `vite.config.ts`.
 
@@ -60,7 +63,9 @@ Enable **Settings → Pages → Source: GitHub Actions**. The Vite base is `/for
 
 - `src/data/fortunes.txt`: 500 explicit `id|text` records.
 - `src/lib/daily.ts`: selection, local dates, persistence, and cross-tab reservation.
-- `src/scene/`: procedural geometry, lighting, layout, and animation.
+- `models/`: authored Blender and GLB assets, model studies, and rebuild notes.
+- `tools/`: deterministic asset authoring, texture generation, optimization, and validation.
+- `src/scene/`: shared GLB loading, lighting, layout, and opening animation.
 - `src/ui/`: accessible input targets and the SVG fallback.
 - `src/App.tsx`: daily lifecycle and printed fortune interface.
 

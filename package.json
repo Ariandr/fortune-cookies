@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:model": "node tools/check-cookie-asset.mjs"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

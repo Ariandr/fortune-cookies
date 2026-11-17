@@ -1,8 +1,8 @@
 import { Suspense, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Environment, Lightformer } from '@react-three/drei';
+import { Environment, Lightformer, useProgress } from '@react-three/drei';
 import * as THREE from 'three';
-import { makeCookieHalf, makeWaferTexture } from './cookieGeometry';
+import { cloneCookiePart, useCookieModel, type CookieModel } from './CookieAsset';
 import { cookieLayout, type CookiePosition } from './layout';
 
 export interface SceneProps {
@@ -13,6 +13,7 @@ export interface SceneProps {
   onChoose: (index: number) => void;
   onReveal: () => void;
   onFailure: () => void;
+  onReady: () => void;
   hovered: number | null;
   onCookieLayout: (index: number, x: number, y: number, width: number) => void;
   onPaperLayout: (x: number, y: number, width: number, height: number) => void;
@@ -23,13 +24,15 @@ const smooth = (a: number, b: number, t: number) => {
 };
 const lerp = THREE.MathUtils.lerp;
 
-function Cookie({ index, position, geometry, material, props, progress }: {
-  index: number; position: CookiePosition; geometry: [THREE.BufferGeometry, THREE.BufferGeometry]; material: THREE.Material[];
+function Cookie({ index, position, model, props, progress }: {
+  index: number; position: CookiePosition; model: CookieModel;
   props: SceneProps; progress: React.RefObject<number>;
 }) {
   const group = useRef<THREE.Group>(null!);
-  const left = useRef<THREE.Mesh>(null!);
-  const right = useRef<THREE.Mesh>(null!);
+  const whole = useRef<THREE.Group>(null!);
+  const left = useRef<THREE.Group>(null!);
+  const right = useRef<THREE.Group>(null!);
+  const parts = useMemo(() => ({ whole: cloneCookiePart(model.whole), left: cloneCookiePart(model.left), right: cloneCookiePart(model.right) }), [model]);
   const hovered = props.hovered === index;
   const { camera, viewport, size } = useThree();
   const projected = useMemo(() => new THREE.Vector3(), []);
@@ -41,6 +44,8 @@ function Cookie({ index, position, geometry, material, props, progress }: {
     const opening = progress.current;
     const focus = props.phase === 'idle' ? 0 : smooth(0, 0.85, opening);
     const split = isChosen ? smooth(0.85, 1.58, opening) : 0;
+    whole.current.visible = split < .0001;
+    left.current.visible = right.current.visible = !whole.current.visible;
     const settle = isChosen ? smooth(1.45, 2.95, opening) : 0;
     const float = Math.sin(time * 0.52 + index * 2.1) * 0.11;
     const hover = hovered && props.phase === 'idle' ? 1.045 : 1;
@@ -67,10 +72,10 @@ function Cookie({ index, position, geometry, material, props, progress }: {
     const targetWidth = 2.3 * worldScale.x * size.height / viewport.height * 16 / (16 - worldPosition.z);
     props.onCookieLayout(index, (projected.x + 1) * size.width / 2, (1 - projected.y) * size.height / 2, targetWidth);
   });
-  return <group ref={group}>
-    <mesh ref={left} geometry={geometry[0]} material={material} />
-    <mesh ref={right} geometry={geometry[1]} material={material} />
-
+  return <group ref={group} dispose={null}>
+    <group ref={whole}><primitive object={parts.whole}/></group>
+    <group ref={left}><primitive object={parts.left}/></group>
+    <group ref={right}><primitive object={parts.right}/></group>
   </group>;
 }
 
@@ -151,12 +156,8 @@ function World(props: SceneProps) {
   const progress = useRef(props.phase === 'revealed' ? 3.2 : 0);
   const elapsed = useRef(0);
   const hasRevealed = useRef(false);
-  const geometry = useMemo(() => [makeCookieHalf(-1), makeCookieHalf(1)] as [THREE.BufferGeometry, THREE.BufferGeometry], []);
-  const texture = useMemo(makeWaferTexture, []);
-  const material = useMemo(() => [new THREE.MeshStandardMaterial({
-    color: '#ffffff', vertexColors: true, roughness: 0.79, metalness: 0,
-    side: THREE.DoubleSide, bumpMap: texture, bumpScale: 0.035,
-  }), new THREE.MeshStandardMaterial({ color: '#b98b48', roughness: 0.94, side: THREE.DoubleSide }), new THREE.MeshStandardMaterial({ color: '#f3d899', roughness: 0.98, side: THREE.DoubleSide })], [texture]);
+  const model = useCookieModel();
+  useEffect(() => props.onReady(), [props.onReady]);
   useEffect(() => {
     const fail = (event: Event) => { event.preventDefault(); props.onFailure(); };
     gl.domElement.addEventListener('webglcontextlost', fail);
@@ -167,7 +168,7 @@ function World(props: SceneProps) {
     hasRevealed.current = false;
     progress.current = props.phase === 'revealed' ? 3.2 : 0;
   }, [props.phase]);
-  useEffect(() => () => { geometry.forEach((g) => g.dispose()); material.forEach((m) => m.dispose()); texture.dispose(); }, [geometry, material, texture]);
+
   useFrame((_, delta) => {
     if (props.phase === 'opening') {
       elapsed.current += Math.min(delta, 0.05);
@@ -180,24 +181,29 @@ function World(props: SceneProps) {
   }, -1);
   const scale = portrait ? Math.min(viewport.width / 7.5, viewport.height / 8.4) : Math.min(viewport.width / 13.3, viewport.height / 7.4);
   return <>
-    <ambientLight intensity={0.75} />
+    <ambientLight intensity={0.4} />
     <directionalLight position={[-4, 6, 8]} intensity={2.8} color="#fff0d8" />
-    <directionalLight position={[5, 1, 4]} intensity={0.6} color="#eedac4" />
-    <directionalLight position={[1, -4, -2]} intensity={1.1} color="#d7b892" />
+    <directionalLight position={[5, 1, 4]} intensity={0.4} color="#eedac4" />
+    <directionalLight position={[1, -4, -2]} intensity={0.8} color="#d7b892" />
     <Environment resolution={64} frames={1}>
       <Lightformer form="rect" intensity={1.5} position={[-4, 4, 4]} scale={[6, 6, 1]} target={[0, 0, 0]} />
       <Lightformer form="rect" intensity={0.8} position={[4, 2, 2]} scale={[4, 8, 1]} target={[0, 0, 0]} />
     </Environment>
     <group scale={scale} position={[0, portrait ? 0.3 * scale : 0, 0]}>
-      {layout.map((position, index) => <Cookie key={index} index={index} position={position} geometry={geometry} material={material} props={props} progress={progress} />)}
+      {layout.map((position, index) => <Cookie key={index} index={index} position={position} model={model} props={props} progress={progress} />)}
       <Paper progress={progress} active={props.phase !== 'idle'} onLayout={props.onPaperLayout} />
       <Crumbs progress={progress} reducedMotion={props.reducedMotion} />
     </group>
   </>;
 }
 
+function AssetStatus() {
+  const { active, progress } = useProgress();
+  return active ? <div className="scene-loading asset-loading" role="status">Preparing your cookies<span>{Math.round(progress)}%</span></div> : null;
+}
+
 export default function FortuneScene(props: SceneProps) {
-  return <Canvas
+  return <div className="webgl-scene"><Canvas
     camera={{ position: [0, 0, 16], fov: 34, near: 0.1, far: 50 }}
     dpr={[1, 1.65]}
     frameloop={props.visible ? 'always' : 'never'}
@@ -206,5 +212,5 @@ export default function FortuneScene(props: SceneProps) {
     onCreated={({ gl }) => { gl.setClearColor(0x000000, 0); }}
   >
     <Suspense fallback={null}><World {...props} /></Suspense>
-  </Canvas>;
+  </Canvas><AssetStatus/></div>;
 }
