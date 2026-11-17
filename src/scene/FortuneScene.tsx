@@ -56,8 +56,8 @@ function Cookie({ index, position, geometry, material, props, progress }: {
       lerp(position.rotation[1] + Math.sin(time * 0.27 + index * 1.7) * 0.08, 0, isChosen ? focus : 0),
       lerp(position.rotation[2] + Math.sin(time * 0.36 + index) * 0.055, 0, isChosen ? focus : 0),
     );
-    left.current.position.set(-split * 0.6 - settle * 0.65, -settle * 0.52, -settle * 0.2);
-    right.current.position.set(split * 0.6 + settle * 0.65, -settle * 0.52, -settle * 0.2);
+    left.current.position.set(-split * 0.6 - settle * 0.85, -settle * 0.95, -settle * 0.2);
+    right.current.position.set(split * 0.6 + settle * 0.85, -settle * 0.95, -settle * 0.2);
     left.current.rotation.set(settle * 0.18, split * 0.42, split * 0.28);
     right.current.rotation.set(settle * -0.18, -split * 0.42, -split * 0.28);
     group.current.updateWorldMatrix(true, false);
@@ -154,16 +154,9 @@ function World(props: SceneProps) {
   const geometry = useMemo(() => [makeCookieHalf(-1), makeCookieHalf(1)] as [THREE.BufferGeometry, THREE.BufferGeometry], []);
   const texture = useMemo(makeWaferTexture, []);
   const material = useMemo(() => [new THREE.MeshStandardMaterial({
-    color: '#dba65a', vertexColors: true, roughness: 0.72, metalness: 0,
+    color: '#ffffff', vertexColors: true, roughness: 0.79, metalness: 0,
     side: THREE.DoubleSide, bumpMap: texture, bumpScale: 0.035,
-  }), new THREE.MeshStandardMaterial({ color: '#965b28', roughness: 0.94, side: THREE.DoubleSide })], [texture]);
-  // WebGL texture coordinates follow the folded wafer surface.
-  useMemo(() => geometry.forEach((g) => {
-    const p = g.attributes.position;
-    const uv: number[] = [];
-    for (let i = 0; i < p.count; i++) uv.push(p.getX(i) * 0.85 + 0.5, p.getY(i) * 1.2 + p.getZ(i) * 0.35);
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  }), [geometry]);
+  }), new THREE.MeshStandardMaterial({ color: '#b98b48', roughness: 0.94, side: THREE.DoubleSide }), new THREE.MeshStandardMaterial({ color: '#f3d899', roughness: 0.98, side: THREE.DoubleSide })], [texture]);
   useEffect(() => {
     const fail = (event: Event) => { event.preventDefault(); props.onFailure(); };
     gl.domElement.addEventListener('webglcontextlost', fail);

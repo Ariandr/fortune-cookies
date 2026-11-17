@@ -1,87 +1,106 @@
 import * as THREE from 'three';
 
-// A folded semicircular wafer, bent around its pinched middle. Four surfaces
-// give each piece a real inner wall, instead of a solid primitive or a flat cutout.
-function wafer(x: number, v: number, face: number, inner: boolean): THREE.Vector3 {
-  const arch = Math.sqrt(Math.max(0.00001, 1 - x * x));
-  const bend = x * 1.55;
-  const width = 1.05 * Math.sin(bend);
-  const rim = Math.pow(v, 0.86);
-  const y = arch * (1.15 * rim - 0.40) - 0.49 * Math.pow(1 - x * x, 4) * v * v + 0.12 * x * x;
-  const bowl = 0.69 * (1 - Math.cos(bend));
-  const puff = arch * (0.56 * Math.sin(Math.PI * v) + 0.045 * Math.pow(v, 4));
-  const thickness = inner ? 0.034 : 0;
-  return new THREE.Vector3(width, y * 1.25, bowl + face * (puff - thickness));
-}
+const HALF_ARC = Math.PI * 0.75;
+const ALONG_ARC = 64;
+const ACROSS_WAFER = 36;
 
-function finish(vertices: number[], indices: number[]): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  const colors = [];
-  const color = new THREE.Color();
-  for (let i = 0; i < vertices.length; i += 3) {
-    const [x, y, z] = vertices.slice(i, i + 3);
-    const noise = Math.sin(x * 23 + Math.sin(y * 31) * 2 + z * 19) * Math.sin(z * 37 + y * 17);
-    const toast = Math.max(0, Math.sin(x * 5.4 + y * 4.2 + z * 6.5));
-    color.setRGB(1 - toast * 0.15 + noise * 0.018, 0.82 - toast * 0.18 + noise * 0.024, 0.53 - toast * 0.17);
-    colors.push(color.r, color.g, color.b);
-  }
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geometry.computeBoundingSphere();
-  return geometry;
+// The reference is a domed horseshoe, rather than a bent strip: a 270-degree
+// wafer surrounds a deep, open notch. Its broad outer skirt stays thin while
+// the folded inner shoulder rises into a rounded, hollow shell.
+function wafer(u: number, v: number, side: -1 | 1, face: -1 | 1, inner: boolean) {
+  const angle = Math.PI / 2 - side * u * HALF_ARC;
+  const outerRadius = 1.14 + 0.008 * Math.sin(angle * 9) ** 2;
+  const innerRadius = 0.18 + 0.72 * Math.pow(u, 3.2);
+  const radius = THREE.MathUtils.lerp(innerRadius, outerRadius, v);
+  const shoulder = Math.pow(Math.sin(Math.PI * Math.pow(Math.min(1, v / 0.9), 0.82)), 0.82);
+  // Both tips flatten into crisp wafer edges, instead of rounded tube caps.
+  const tip = THREE.MathUtils.smoothstep(1 - u, 0, 0.23);
+  const bulge = shoulder * tip;
+  const grain = Math.sin(radius * 83 + Math.sin(angle * 43) * 2) * Math.sin(angle * 79) * 0.0016 * bulge;
+  const depth = (face === 1 ? 0.42 : 0.22) * bulge;
+  const wall = inner ? 0.026 * shoulder * tip : 0;
+  const z = face * (0.015 + depth - wall) + grain;
+  // Shared, complementary fracture edges lie through the back of the horseshoe.
+  const fracture = Math.pow(1 - u, 16) * Math.sin(Math.PI * v)
+    * (Math.sin(v * 43) + Math.sin(v * 19)) * 0.008;
+  return new THREE.Vector3(radius * Math.cos(angle) + fracture, radius * Math.sin(angle) - 0.14, z);
 }
 
 export function makeCookieHalf(side: -1 | 1): THREE.BufferGeometry {
   const vertices: number[] = [];
+  const colors: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
   const groups: { start: number; count: number; material: number }[] = [];
-  const nx = 48, nv = 40;
-  function surface(face: number, inner: boolean) {
+  const golden = new THREE.Color('#e4ad43');
+  const pale = new THREE.Color('#f4cc6f');
+  const toasted = new THREE.Color('#b8792d');
+  const color = new THREE.Color();
+
+  function vertex(u: number, v: number, face: -1 | 1, inner: boolean) {
+    const point = wafer(u, v, side, face, inner);
+    vertices.push(point.x, point.y, point.z);
+    uvs.push(point.x * 1.3 + 0.5, point.y * 1.3 + point.z * 0.4);
+    const edgeToast = THREE.MathUtils.smoothstep(v, 0.84, 1) * 0.77;
+    const tipToast = THREE.MathUtils.smoothstep(u, 0.9, 1) * 0.13;
+    const fleck = Math.max(0, Math.sin(point.x * 31 + point.y * 17) * Math.sin(point.y * 37 - point.z * 23));
+    color.copy(golden).lerp(pale, Math.sin(v * Math.PI) * 0.42);
+    color.lerp(toasted, edgeToast + tipToast + fleck * 0.055);
+    colors.push(color.r, color.g, color.b);
+  }
+
+  function surface(face: -1 | 1, inner: boolean) {
     const start = indices.length;
     const offset = vertices.length / 3;
-    for (let i = 0; i <= nx; i++) {
-      const x = side * i / nx * 0.9998;
-      for (let j = 0; j <= nv; j++) {
-        const point = wafer(x, j / nv, face, inner);
-        // Matching irregular edges form one fracture when the two halves meet.
-        point.x += (1 - i / nx) ** 10 * (Math.sin(j * 1.43) + Math.sin(j * 0.63)) * 0.012;
-        vertices.push(point.x, point.y, point.z);
+    for (let i = 0; i <= ALONG_ARC; i++) {
+      for (let j = 0; j <= ACROSS_WAFER; j++) {
+        vertex(i / ALONG_ARC, j / ACROSS_WAFER, face, inner);
       }
     }
-    for (let i = 0; i < nx; i++) for (let j = 0; j < nv; j++) {
-      const a = offset + i * (nv + 1) + j, b = a + nv + 1;
-      const flip = side * face * (inner ? -1 : 1) > 0;
-      indices.push(...(flip ? [a, b, a + 1, b, b + 1, a + 1] : [a, a + 1, b, b, a + 1, b + 1]));
+    for (let i = 0; i < ALONG_ARC; i++) {
+      for (let j = 0; j < ACROSS_WAFER; j++) {
+        const a = offset + i * (ACROSS_WAFER + 1) + j;
+        const b = a + ACROSS_WAFER + 1;
+        const flip = side * face * (inner ? -1 : 1) > 0;
+        indices.push(...(flip ? [a, b, a + 1, b, b + 1, a + 1] : [a, a + 1, b, b, a + 1, b + 1]));
+      }
     }
     groups.push({ start, count: indices.length - start, material: inner ? 1 : 0 });
   }
-  for (const face of [-1, 1]) {
+
+  function ribbon(segments: number, sample: (t: number, back: boolean) => void, material = 0) {
+    const start = indices.length;
+    const offset = vertices.length / 3;
+    for (let i = 0; i <= segments; i++) {
+      sample(i / segments, false);
+      sample(i / segments, true);
+      if (i < segments) {
+        const a = offset + i * 2;
+        indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+    }
+    groups.push({ start, count: indices.length - start, material });
+  }
+
+  for (const face of [-1, 1] as const) {
     surface(face, false);
     surface(face, true);
-    // Visible wafer thickness along the broken middle and the open lip.
-    for (const edge of ['fracture', 'lip']) {
-      const start = indices.length;
-      const offset = vertices.length / 3;
-      for (let i = 0; i <= nv; i++) {
-        const x = edge === 'fracture' ? 0 : side * i / nv * 0.9998;
-        const v = edge === 'fracture' ? i / nv : 1;
-        for (const inner of [false, true]) {
-          const p = wafer(x, v, face, inner);
-          if (edge === 'fracture') p.x += (Math.sin(i * 1.43) + Math.sin(i * 0.63)) * 0.012;
-          vertices.push(p.x, p.y, p.z);
-        }
-        if (i < nv) {
-          const a = offset + i * 2;
-          indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-        }
-      }
-      groups.push({ start, count: indices.length - start, material: 0 });
-    }
+    // Only the wafer walls are capped at the break, leaving a hollow interior.
+    ribbon(ACROSS_WAFER, (v, inner) => vertex(0, v, face, inner), 2);
   }
-  const geometry = finish(vertices, indices);
-  groups.forEach(({start, count, material}) => geometry.addGroup(start, count, material));
+  for (const v of [0, 1]) {
+    ribbon(ALONG_ARC, (u, back) => vertex(u, v, back ? -1 : 1, false));
+  }
+  ribbon(ACROSS_WAFER, (v, back) => vertex(1, v, back ? -1 : 1, false));
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  groups.forEach(({ start, count, material }) => geometry.addGroup(start, count, material));
   return geometry;
 }
 

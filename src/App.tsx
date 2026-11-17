@@ -64,7 +64,7 @@ export function App() {
     if (!style) return;
     style.transform = `translate3d(${x}px, ${y}px, 0)`;
     style.setProperty('--target-width', `${Math.max(52, width)}px`);
-    style.setProperty('--target-height', `${Math.max(44, width * 0.75)}px`);
+    style.setProperty('--target-height', `${Math.max(44, width * 0.92)}px`);
   }, []);
   const onPaperLayout = useCallback((x: number, y: number, width: number, height: number) => {
     const style = reveal.current?.style;
