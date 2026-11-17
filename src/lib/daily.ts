@@ -5,6 +5,7 @@ export interface SavedDraw {
   version: 1;
   day: string;
   fortuneId: string;
+  bonusFortuneId?: string;
   seen: string[];
 }
 export interface StorageLike {
@@ -28,24 +29,33 @@ export function parseDraw(value: string | null): SavedDraw | null {
       || typeof state.fortuneId !== 'string' || !fortuneById.has(state.fortuneId) || !Array.isArray(state.seen)) return null;
     const seen = [...new Set(state.seen.filter((id) => typeof id === 'string' && fortuneById.has(id)))];
     if (!seen.includes(state.fortuneId)) seen.push(state.fortuneId);
-    return { version: 1, day: state.day, fortuneId: state.fortuneId, seen };
+    const bonusFortuneId = typeof state.bonusFortuneId === 'string' && fortuneById.has(state.bonusFortuneId)
+      && state.bonusFortuneId !== state.fortuneId ? state.bonusFortuneId : undefined;
+    if (bonusFortuneId && !seen.includes(bonusFortuneId)) seen.push(bonusFortuneId);
+    return { version: 1, day: state.day, fortuneId: state.fortuneId, ...(bonusFortuneId ? { bonusFortuneId } : {}), seen };
   } catch {
     return null;
   }
 }
 
-export function nextDraw(previous: SavedDraw | null, date = new Date(), random = Math.random): SavedDraw {
+export function nextDraw(previous: SavedDraw | null, date = new Date(), random = Math.random, bonus = false): SavedDraw {
   const day = localDay(date);
-  if (previous?.day === day) return previous;
+  const sameDay = previous?.day === day;
+  if (sameDay && (!bonus || previous.bonusFortuneId)) return previous;
   const seen = new Set(previous?.seen ?? []);
   let available = fortunes.filter(({ id }) => !seen.has(id));
   if (available.length === 0) {
     seen.clear();
-    available = fortunes.filter(({ id }) => id !== previous?.fortuneId);
+    // When a cycle ends between today's cookies, keep both daily fortunes distinct.
+    if (sameDay) seen.add(previous.fortuneId);
+    const lastId = previous?.bonusFortuneId ?? previous?.fortuneId;
+    available = fortunes.filter(({ id }) => !seen.has(id) && id !== lastId);
   }
   const choice = available[Math.min(available.length - 1, Math.max(0, Math.floor(random() * available.length)))];
   seen.add(choice.id);
-  return { version: 1, day, fortuneId: choice.id, seen: [...seen] };
+  return sameDay
+    ? { ...previous, bonusFortuneId: choice.id, seen: [...seen] }
+    : { version: 1, day, fortuneId: choice.id, seen: [...seen] };
 }
 
 export class DailyStore {
@@ -67,12 +77,20 @@ export class DailyStore {
   }
 
   today(date = new Date()): Fortune | null {
-    const draw = this.read();
-    return draw?.day === localDay(date) ? fortuneById.get(draw.fortuneId) ?? null : null;
+    return this.todayFortunes(date).at(-1) ?? null;
   }
 
-  reserve(date = new Date(), random = Math.random): Fortune {
-    this.memory = nextDraw(this.read(), date, random);
+  todayFortunes(date = new Date()): Fortune[] {
+    const draw = this.read();
+    if (draw?.day !== localDay(date)) return [];
+    return [draw.fortuneId, draw.bonusFortuneId].flatMap((id) => {
+      const fortune = id ? fortuneById.get(id) : undefined;
+      return fortune ? [fortune] : [];
+    });
+  }
+
+  reserve(date = new Date(), random = Math.random, bonus = false): Fortune {
+    this.memory = nextDraw(this.read(), date, random, bonus);
     try {
       const storage = this.storage();
       if (!storage) throw new Error('Storage unavailable');
@@ -81,15 +99,15 @@ export class DailyStore {
     } catch {
       this.persistent = false;
     }
-    return fortuneById.get(this.memory.fortuneId)!;
+    return fortuneById.get(bonus ? this.memory.bonusFortuneId ?? this.memory.fortuneId : this.memory.fortuneId)!;
   }
 
-  async reserveExclusive(): Promise<Fortune> {
+  async reserveExclusive(bonus = false): Promise<Fortune> {
     // Re-read within the shared lock so simultaneous tabs reserve the same draw.
     if (typeof navigator !== 'undefined' && navigator.locks) {
-      return navigator.locks.request(STORAGE_KEY, () => this.reserve());
+      return navigator.locks.request(STORAGE_KEY, () => this.reserve(new Date(), Math.random, bonus));
     }
-    return this.reserve();
+    return this.reserve(new Date(), Math.random, bonus);
   }
 }
 

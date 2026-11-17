@@ -11,9 +11,10 @@ const positions = [
 export default function FallbackScene(props: SceneProps) {
   useEffect(() => {
     if (props.phase !== 'opening') return;
+    const crack = window.setTimeout(props.onCrack, props.reducedMotion ? 0 : 700);
     const id = window.setTimeout(props.onReveal, props.reducedMotion ? 180 : 2800);
-    return () => window.clearTimeout(id);
-  }, [props.phase, props.reducedMotion, props.onReveal]);
+    return () => { window.clearTimeout(crack); window.clearTimeout(id); };
+  }, [props.phase, props.reducedMotion, props.onReveal, props.onCrack]);
   return <div className={`fallback-scene ${props.phase !== 'idle' ? 'has-selection' : ''}`}>
     {positions.map(([x, y, rotation, scale], i) => <div key={i}
       className={`fallback-cookie ${props.phase !== 'idle' && props.selected === i ? 'is-selected' : ''}`}

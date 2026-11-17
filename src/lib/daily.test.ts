@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fortunes } from '../data/fortunes';
 import { DailyStore, localDay, nextDraw, parseDraw, STORAGE_KEY, untilMidnight, type StorageLike } from './daily';
 
@@ -9,10 +9,10 @@ function storage(): StorageLike {
 const date = new Date(2026, 10, 17, 12);
 
 describe('fortune collection', () => {
-  it('contains 500 short, distinct fortunes with permanent IDs', () => {
-    expect(fortunes).toHaveLength(500);
-    expect(new Set(fortunes.map(({ id }) => id)).size).toBe(500);
-    expect(new Set(fortunes.map(({ text }) => text.toLowerCase().replace(/[^a-z0-9]/g, ''))).size).toBe(500);
+  it('contains 600 short, distinct fortunes with permanent IDs', () => {
+    expect(fortunes).toHaveLength(600);
+    expect(fortunes.map(({ id }) => id)).toEqual(Array.from({ length: 600 }, (_, i) => String(i + 1).padStart(3, '0')));
+    expect(new Set(fortunes.map(({ text }) => text.toLowerCase().replace(/[^a-z0-9]/g, ''))).size).toBe(600);
     for (const { id, text } of fortunes) {
       expect(id).toMatch(/^\d{3}$/);
       expect(text.length).toBeLessThanOrEqual(180);
@@ -53,17 +53,136 @@ describe('daily draw', () => {
     expect(parseDraw(shared.getItem(STORAGE_KEY))?.seen).toHaveLength(2);
   });
 
-  it('does not repeat until all 500 are used, then avoids an immediate repeat', () => {
+  it('does not repeat until all 600 are used, then avoids an immediate repeat', () => {
     let saved = null;
     const ids = new Set();
-    for (let i = 0; i < 500; i++) {
+    for (let i = 0; i < 600; i++) {
       saved = nextDraw(saved, new Date(2026, 0, i + 1), () => 0.999);
       ids.add(saved.fortuneId);
     }
-    expect(ids.size).toBe(500);
-    const next = nextDraw(saved, new Date(2026, 0, 501), () => 0);
+    expect(ids.size).toBe(600);
+    const next = nextDraw(saved, new Date(2026, 0, 601), () => 0);
     expect(next.fortuneId).not.toBe(saved!.fortuneId);
     expect(next.seen).toHaveLength(1);
+  });
+
+  it('allows one distinct extra fortune, saves it before opening, and restores both after reload', () => {
+    const shared = storage();
+    const store = new DailyStore(() => shared);
+    const first = store.reserve(date, () => 0);
+    const bonus = store.reserve(date, () => 0, true);
+    expect(bonus.id).not.toBe(first.id);
+    const reloaded = new DailyStore(() => shared);
+    expect(reloaded.today(date)).toEqual(bonus);
+    expect(reloaded.todayFortunes(date)).toEqual([first, bonus]);
+    expect(reloaded.reserve(date, () => .99, true)).toEqual(bonus);
+    expect(reloaded.reserve(date, () => .99)).toEqual(first);
+    expect(parseDraw(shared.getItem(STORAGE_KEY))?.seen).toHaveLength(2);
+  });
+
+  it('enforces the bonus allowance across rapid requests from separate tabs', () => {
+    const shared = storage();
+    const firstTab = new DailyStore(() => shared);
+    const secondTab = new DailyStore(() => shared);
+    firstTab.reserve(date, () => 0);
+    const bonus = secondTab.reserve(date, () => .3, true);
+    for (let i = 0; i < 20; i++) {
+      expect(firstTab.reserve(date, Math.random, true)).toEqual(bonus);
+      expect(secondTab.reserve(date, Math.random, true)).toEqual(bonus);
+    }
+    expect(firstTab.todayFortunes(date)).toHaveLength(2);
+    expect(parseDraw(shared.getItem(STORAGE_KEY))?.seen).toHaveLength(2);
+  });
+
+  it('serializes simultaneous bonus reservations through the shared Web Lock', async () => {
+    const shared = storage();
+    const stores = [new DailyStore(() => shared), new DailyStore(() => shared)];
+    stores[0].reserve();
+    let queue = Promise.resolve();
+    const request = vi.fn((_key: string, work: () => unknown) => {
+      const result = queue.then(work);
+      queue = result.then(() => {});
+      return result;
+    });
+    vi.stubGlobal('navigator', { locks: { request } });
+    try {
+      const results = await Promise.all(Array.from({ length: 12 }, (_, index) => stores[index % 2].reserveExclusive(true)));
+      expect(new Set(results.map(({ id }) => id)).size).toBe(1);
+      expect(request).toHaveBeenCalledTimes(12);
+      expect(parseDraw(shared.getItem(STORAGE_KEY))?.seen).toHaveLength(2);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('renews both daily allowances at local midnight and retains history', () => {
+    const shared = storage();
+    const store = new DailyStore(() => shared);
+    const before = new Date(2026, 10, 17, 23, 59);
+    const after = new Date(2026, 10, 18, 0, 0);
+    const yesterday = [store.reserve(before, () => 0), store.reserve(before, () => 0, true)];
+    expect(store.todayFortunes(after)).toEqual([]);
+    const today = [store.reserve(after, () => 0), store.reserve(after, () => 0, true)];
+    expect(new Set([...yesterday, ...today].map(({ id }) => id)).size).toBe(4);
+    expect(store.todayFortunes(after)).toEqual(today);
+    expect(parseDraw(shared.getItem(STORAGE_KEY))?.seen).toHaveLength(4);
+  });
+
+  it('does not allocate two fortunes when a bonus is requested without a first draw', () => {
+    const shared = storage();
+    const store = new DailyStore(() => shared);
+    const saved = nextDraw(null, date, () => 0, true);
+    expect(saved.bonusFortuneId).toBeUndefined();
+    expect(saved.seen).toHaveLength(1);
+    const first = store.reserve(date, () => 0, true);
+    expect(store.todayFortunes(date)).toEqual([first]);
+    expect(store.reserve(date, () => .99)).toEqual(first);
+  });
+
+  it('keeps the cookies distinct when the collection ends between the first and extra draw', () => {
+    const first = { version: 1 as const, day: '2026-11-17', fortuneId: '600', seen: fortunes.map(({ id }) => id) };
+    const bonus = nextDraw(first, date, () => .9999, true);
+    expect(bonus.bonusFortuneId).not.toBe(first.fortuneId);
+    expect(bonus.fortuneId).toBe(first.fortuneId);
+    expect(parseDraw(JSON.stringify(bonus))).toEqual(bonus);
+    expect(nextDraw(bonus, date, () => 0, true)).toEqual(bonus);
+    const nextDay = nextDraw(bonus, new Date(2026, 10, 18), () => .9999);
+    expect([bonus.fortuneId, bonus.bonusFortuneId]).not.toContain(nextDay.fortuneId);
+  });
+
+  it('uses all 600 fortunes before repeating when two are opened every day', () => {
+    let saved = null;
+    const ids = [];
+    for (let day = 0; day < 300; day++) {
+      saved = nextDraw(saved, new Date(2026, 0, day + 1), () => .9);
+      ids.push(saved.fortuneId);
+      saved = nextDraw(saved, new Date(2026, 0, day + 1), () => .9, true);
+      ids.push(saved.bonusFortuneId);
+    }
+    expect(new Set(ids).size).toBe(600);
+    const next = nextDraw(saved, new Date(2026, 0, 301), () => .9);
+    expect(next.fortuneId).not.toBe(saved!.bonusFortuneId);
+  });
+
+  it('retains the two-fortune limit in memory when storage is denied or full', () => {
+    for (const getStorage of [
+      () => { throw new Error('blocked'); },
+      () => ({ getItem: () => null, setItem: () => { throw new Error('full'); } }),
+    ]) {
+      const store = new DailyStore(getStorage);
+      const first = store.reserve(date, () => 0);
+      const bonus = store.reserve(date, () => .5, true);
+      expect(store.reserve(date, () => .9, true)).toEqual(bonus);
+      expect(store.todayFortunes(date)).toEqual([first, bonus]);
+      expect(store.persistent).toBe(false);
+    }
+  });
+
+  it('preserves pre-update daily records and ignores invalid extra fortune IDs', () => {
+    const old = { version: 1, day: '2026-11-17', fortuneId: '201', seen: ['005', '201'] };
+    expect(parseDraw(JSON.stringify(old))).toEqual(old);
+    for (const bonusFortuneId of ['invalid', '201', null, 25]) {
+      expect(parseDraw(JSON.stringify({ ...old, bonusFortuneId }))).toEqual(old);
+    }
+    expect(parseDraw(JSON.stringify({ ...old, bonusFortuneId: '501' }))?.seen).toEqual(['005', '201', '501']);
   });
 
   it('keeps the current session usable if storage access or writes fail', () => {

@@ -1,6 +1,6 @@
 # Fortune Cookies
 
-A small daily ritual: ten floating, golden 3D fortune cookies, one personal fortune, and a paper slip worth keeping.
+A small daily ritual: ten floating, golden 3D fortune cookies, a personal fortune, and one optional extra cookie each day.
 
 **Site:** https://ariandr.github.io/fortune-cookies/
 
@@ -27,9 +27,13 @@ npm run preview
 
 Click, tap, swipe at least 36 pixels, or use Tab and Enter/Space to choose a cookie. The selected cookie moves forward, its two wafer shells split, crumbs fall, and a paper slip unfurls. A copy button lets you keep the words.
 
-There is one draw per **local calendar day**, per browser. A reservation is saved before animation, so interruptions and reloads preserve the same fortune. A new draw becomes available at local midnight, including when a previously hidden tab is reopened. Web Locks coordinate simultaneous tabs where supported; storage events synchronize open pages. In browsers without Web Locks, reservations are best effort across exactly simultaneous tabs.
+There is a first draw and **one optional extra draw per local calendar day**, per browser. After the first reveal, **Want one more?** returns you to the cookies. The extra is used only when you select a cookie; you can go back without using it. Once opened, both fortunes can be reread using the numbered controls beneath the paper.
 
-The app draws without replacement from 500 original English fortunes. After the collection is exhausted, a fresh cycle begins without immediately repeating the previous draw. Records have explicit permanent IDs; preserve those IDs when editing the text collection.
+Reservations are saved before animation, so interruptions and reloads preserve both fortunes. Both allowances renew at local midnight, including when a previously hidden tab is reopened. Existing saved fortunes and history from the original one-cookie release are preserved. Web Locks coordinate simultaneous tabs where supported; storage events synchronize open pages. In browsers without Web Locks, reservations are best effort across exactly simultaneous tabs.
+
+The app draws without replacement from 600 original English fortunes, including 100 about positive thinking, manifestation, visualization, and turning intentions into progress. After the collection is exhausted, a fresh cycle begins without immediately repeating the previous draw. The two fortunes opened on one day are always different. Records have explicit permanent IDs; preserve those IDs when editing the text collection.
+
+Cookie selection has a short tap sound; the fracture plays a crisp wafer snap followed by a soft paper rustle. These original sounds are synthesized locally with Web Audio, with no audio downloads. The header sound toggle is remembered separately from fortune history. Audio starts only after a cookie gesture, stops in hidden tabs, and never blocks a draw if audio is unavailable. Context creation and resumption follow the [MDN Web Audio guidance](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Best_practices).
 
 No account or server is required. Clearing browser storage or changing devices starts a separate history. If storage is denied or full, the app preserves its draw in memory for the current visit and displays a short notice.
 
@@ -61,8 +65,9 @@ Enable **Settings → Pages → Source: GitHub Actions**. The Vite base is `/for
 
 ## Project map
 
-- `src/data/fortunes.txt`: 500 explicit `id|text` records.
+- `src/data/fortunes.txt`: 600 explicit `id|text` records.
 - `src/lib/daily.ts`: selection, local dates, persistence, and cross-tab reservation.
+- `src/lib/cookieAudio.ts`: original tap, crack, and paper sounds with a persistent mute preference.
 - `models/`: authored Blender and GLB assets, model studies, and rebuild notes.
 - `tools/`: deterministic asset authoring, texture generation, optimization, and validation.
 - `src/scene/`: shared GLB loading, lighting, layout, and opening animation.

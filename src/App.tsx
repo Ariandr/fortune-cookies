@@ -1,5 +1,6 @@
 import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { dailyStore, STORAGE_KEY, untilMidnight } from './lib/daily';
+import { cookieAudio, readSoundPreference, saveSoundPreference, SOUND_KEY } from './lib/cookieAudio';
 import type { Fortune } from './data/fortunes';
 import FallbackScene from './ui/FallbackScene';
 import { CookieTarget } from './ui/CookieTarget';
@@ -42,7 +43,10 @@ function Star({ className = '' }: { className?: string }) {
 }
 
 export function App() {
-  const [fortune, setFortune] = useState<Fortune | null>(() => dailyStore.today());
+  const [todayFortunes, setTodayFortunes] = useState(() => dailyStore.todayFortunes());
+  const [fortune, setFortune] = useState<Fortune | null>(() => todayFortunes.at(-1) ?? null);
+  const [choosingBonus, setChoosingBonus] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(readSoundPreference);
   const [phase, setPhase] = useState<SceneProps['phase']>(() => fortune ? 'revealed' : 'idle');
   const [selected, setSelected] = useState(5);
   const [webgl, setWebgl] = useState(supportsWebGL);
@@ -54,6 +58,7 @@ export function App() {
   const [copied, setCopied] = useState(false);
   const reducedMotion = usePreference('(prefers-reduced-motion: reduce)');
   const busy = useRef(false);
+  const crackPlayed = useRef(false);
   const activePhase = useRef(phase);
   const paper = useRef<HTMLDivElement>(null);
   const reveal = useRef<HTMLDivElement>(null);
@@ -84,6 +89,12 @@ export function App() {
     busy.current = false;
     setPhase('revealed');
   }, []);
+  const onCrack = useCallback(() => {
+    if (activePhase.current !== 'opening' || crackPlayed.current) return;
+    crackPlayed.current = true;
+    cookieAudio.crack();
+  }, []);
+  useEffect(() => { cookieAudio.setEnabled(soundEnabled); }, [soundEnabled]);
 
   const choose = useCallback(async (index: number) => {
     if (busy.current) return;
@@ -92,32 +103,53 @@ export function App() {
       return;
     }
     busy.current = true;
+    crackPlayed.current = false;
+    cookieAudio.tap();
+    let draw: Fortune;
     try {
-      const draw = await dailyStore.reserveExclusive();
-      setFortune(draw);
-      setPersistent(dailyStore.persistent);
-      setSelected(index);
-      setPhase('opening');
+      draw = await dailyStore.reserveExclusive(choosingBonus);
     } catch {
       // A denied Web Locks permission must not prevent the ordinary daily draw.
-      const draw = dailyStore.reserve();
-      setFortune(draw);
-      setPersistent(dailyStore.persistent);
-      setSelected(index);
-      setPhase('opening');
+      draw = dailyStore.reserve(new Date(), Math.random, choosingBonus);
     }
-  }, []);
+    setFortune(draw);
+    setTodayFortunes(dailyStore.todayFortunes());
+    setPersistent(dailyStore.persistent);
+    setChoosingBonus(false);
+    setCopied(false);
+    setSelected(index);
+    setPhase('opening');
+  }, [choosingBonus]);
+
+  function chooseOneMore() {
+    const draws = dailyStore.todayFortunes();
+    setTodayFortunes(draws);
+    if (busy.current || draws.length !== 1) return;
+    setChoosingBonus(true);
+    setHovered(null);
+    setPhase('idle');
+  }
+
+  function toggleSound() {
+    const enabled = !soundEnabled;
+    cookieAudio.setEnabled(enabled);
+    saveSoundPreference(enabled);
+    setSoundEnabled(enabled);
+  }
 
   useEffect(() => {
     let timeout: number;
     function sync() {
-      const draw = dailyStore.today();
+      const draws = dailyStore.todayFortunes();
+      setTodayFortunes(draws);
       setPersistent(dailyStore.persistent);
-      if (draw) {
-        setFortune(draw);
-        if (activePhase.current !== 'opening') setPhase('revealed');
+      if (draws.length) {
+        setFortune((current) => draws.find(({ id }) => id === current?.id) ?? draws.at(-1)!);
+        if (draws.length === 2) setChoosingBonus(false);
+        if (activePhase.current !== 'opening' && !(choosingBonus && draws.length === 1)) setPhase('revealed');
       } else {
         busy.current = false;
+        setChoosingBonus(false);
         setFortune(null);
         setPhase('idle');
       }
@@ -126,8 +158,13 @@ export function App() {
     }
     function storageChanged(event: StorageEvent) {
       if (event.key === STORAGE_KEY || event.key === null) sync();
+      if (event.key === SOUND_KEY || event.key === null) setSoundEnabled(readSoundPreference());
     }
-    function visibilityChanged() { setVisible(!document.hidden); if (!document.hidden) sync(); }
+    function visibilityChanged() {
+      setVisible(!document.hidden);
+      if (document.hidden) cookieAudio.stop();
+      else sync();
+    }
     timeout = window.setTimeout(sync, untilMidnight() + 100);
     window.addEventListener('storage', storageChanged);
     window.addEventListener('focus', sync);
@@ -138,7 +175,16 @@ export function App() {
       window.removeEventListener('focus', sync);
       document.removeEventListener('visibilitychange', visibilityChanged);
     };
-  }, []);
+  }, [choosingBonus]);
+
+  useEffect(() => {
+    if (!choosingBonus) return;
+    const timer = window.setTimeout(() => {
+      const target = webgl ? targets.current[0]?.querySelector('button') : document.querySelector<HTMLButtonElement>('.fallback-cookie .cookie-target');
+      target?.focus({ preventScroll: true });
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [choosingBonus, sceneReady, webgl]);
 
   useEffect(() => {
     if (phase !== 'revealed') return;
@@ -146,11 +192,12 @@ export function App() {
     const timer = window.setTimeout(() => paper.current?.focus({ preventScroll: true }), 80);
     return () => clearTimeout(timer);
   }, [phase]);
-  useEffect(() => () => clearTimeout(copyTimer.current), []);
+  useEffect(() => () => { clearTimeout(copyTimer.current); cookieAudio.stop(); }, []);
 
-  const sceneProps: SceneProps = { phase, selected, reducedMotion, visible, onChoose: choose, onReveal, onFailure, onReady, onPaperLayout, onCookieLayout, hovered };
+  const sceneProps: SceneProps = { phase, selected, reducedMotion, visible, onChoose: choose, onReveal, onCrack, onFailure, onReady, onPaperLayout, onCookieLayout, hovered };
   const date = new Intl.DateTimeFormat('en', { month: 'long', day: 'numeric' }).format(new Date());
   const revealed = phase === 'revealed';
+  const extraFortune = todayFortunes.length === 2 && fortune?.id === todayFortunes[1].id;
   async function copyFortune() {
     if (!fortune) return;
     try {
@@ -172,14 +219,20 @@ export function App() {
         <span className="brand-mark"><CookieIllustration /></span>
         <span>fortune cookies<span className="brand-dot">.</span></span>
       </a>
-      <div className="daily-badge"><span className="sun-icon" aria-hidden="true">☼</span><span>A LITTLE WONDER, ONCE A DAY</span></div>
+      <div className="header-actions">
+        <button className="sound-button" onClick={toggleSound} aria-label="Sound effects" aria-pressed={soundEnabled} title={soundEnabled ? 'Mute sounds' : 'Enable sounds'}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M11 4 5 9H2v6h3l6 5V4Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>{soundEnabled ? <><path d="M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></> : <path d="m16 9 6 6m0-6-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>}</svg>
+          <span>Sound {soundEnabled ? 'on' : 'off'}</span>
+        </button>
+        <div className="daily-badge"><span className="sun-icon" aria-hidden="true">☼</span><span>A LITTLE WONDER, EVERY DAY</span></div>
+      </div>
     </header>
 
     <main>
       <div className="intro">
         <div className="eyebrow"><span className="eyebrow-line"/> A SMALL RITUAL. A LITTLE POSSIBILITY. <span className="eyebrow-line"/></div>
-        <h1>{phase === 'idle' ? <>Good things are<br/><em>on their way.</em><Star className="title-star"/></> : <>A little hope,<br/><em>just for you.</em><Star className="title-star"/></>}</h1>
-        <p className="intro-description">{phase === 'idle' ? 'Follow your curiosity. See what’s inside.' : 'A few words to carry into your day.'}</p>
+        <h1>{phase === 'idle' ? choosingBonus ? <>A little more<br/><em>possibility.</em><Star className="title-star"/></> : <>Good things are<br/><em>on their way.</em><Star className="title-star"/></> : <>A little hope,<br/><em>just for you.</em><Star className="title-star"/></>}</h1>
+        <p className="intro-description">{phase === 'idle' ? choosingBonus ? 'Choose your extra cookie for today.' : 'Follow your curiosity. See what’s inside.' : 'A few words to carry into your day.'}</p>
       </div>
 
       <section className="cookie-stage" aria-label="Choose from ten floating fortune cookies" aria-busy={phase === 'opening'}>
@@ -199,29 +252,40 @@ export function App() {
             onChoose={choose} onHover={(value) => setHovered(value ? index : null)} />
         </div>)}</div>}
         <div ref={reveal} className={`fortune-reveal ${revealed ? 'is-visible' : ''}`} aria-hidden={!revealed}>
-          <div className="fortune-paper" ref={paper} tabIndex={revealed ? -1 : undefined} aria-label="Your fortune for today">
-            <div className="paper-topline"><span>YOUR LITTLE FORTUNE</span><Star /></div>
+          <div className="fortune-paper" ref={paper} tabIndex={revealed ? -1 : undefined} aria-label={extraFortune ? 'Your extra fortune for today' : 'Your fortune for today'}>
+            <div className="paper-topline"><span>{extraFortune ? 'YOUR EXTRA FORTUNE' : 'YOUR LITTLE FORTUNE'}</span><Star /></div>
             <p className="fortune-text">{fortune?.text}</p>
             <div className="paper-bottomline"><span>KEEP A LITTLE HOPE CLOSE.</span><span>No. {fortune?.id}</span></div>
           </div>
           <div className="fortune-actions">
             <span className="fortune-date">{date} <span>·</span> yours for today</span>
+            <div className="fortune-toolbar">
             <button className="copy-button" onClick={copyFortune} tabIndex={revealed ? 0 : -1} aria-label="Copy your fortune">
               <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor"/><path d="M12 4V3H3v9h1" stroke="currentColor" strokeLinecap="round"/></svg>
               {copied ? 'Copied' : 'Keep these words'}
             </button>
+            {todayFortunes.length === 2 && <div className="fortune-history" role="group" aria-label="Today's fortunes">
+              <span>Today</span>{todayFortunes.map((draw, index) => <button key={draw.id} onClick={() => { setFortune(draw); setCopied(false); }} aria-label={index === 0 ? 'Read your first fortune' : 'Read your extra fortune'} aria-pressed={fortune?.id === draw.id} tabIndex={revealed ? 0 : -1}>{index + 1}</button>)}
+            </div>}
+            </div>
           </div>
         </div>
       </section>
 
       <div className="ritual-instruction">
+        {revealed && todayFortunes.length === 1 ? <>
+          <button className="extra-fortune-button" onClick={chooseOneMore}>Want one more? <span aria-hidden="true">↗</span></button>
+          <span>ONE EXTRA FORTUNE, ONCE A DAY</span>
+        </> : <>
         <div className="instruction-icon" aria-hidden="true">{revealed ? <Star/> : <svg width="24" height="27" viewBox="0 0 24 27" fill="none"><path d="M9 16V6a2 2 0 0 1 4 0v7l1-2c1-2 3-1 3 1 2-1 3 0 3 2v5c0 3-2 5-3 6H9l-6-8c-1-2 1-3 3-1l3 3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/><path d="m4 4 2 1m11-3-1 2M10 0v2" stroke="currentColor" strokeLinecap="round"/></svg>}</div>
-        <p>{phase === 'opening' ? 'A little possibility is unfolding…' : revealed ? 'Good things take their own sweet time.' : 'A little nudge. A little luck.'}</p>
-        <span>{phase === 'opening' ? 'THIS MOMENT IS JUST FOR YOU' : revealed ? 'COME BACK TOMORROW FOR ANOTHER LITTLE FORTUNE' : 'CLICK, TAP, OR SWIPE A COOKIE TO REVEAL YOUR FORTUNE'}</span>
+        <p>{phase === 'opening' ? 'A little possibility is unfolding…' : revealed ? 'A little more hope to keep.' : choosingBonus ? 'One more little possibility.' : 'A little nudge. A little luck.'}</p>
+        <span>{phase === 'opening' ? 'THIS MOMENT IS JUST FOR YOU' : revealed ? 'YOUR TWO FORTUNES ARE HERE. COME BACK TOMORROW.' : 'CLICK, TAP, OR SWIPE A COOKIE TO REVEAL YOUR FORTUNE'}</span>
+        {choosingBonus && phase === 'idle' && <button className="cancel-extra-button" onClick={() => { setChoosingBonus(false); setPhase('revealed'); }}>Back to your fortune</button>}
+        </>}
         {!persistent && <small className="storage-note">Your fortune will stay for this visit, but may reset when you leave.</small>}
       </div>
     </main>
     <footer className="site-footer"><span>BAKED WITH OPTIMISM</span><span className="footer-center" aria-hidden="true">✧</span><span>ONE COOKIE. COUNTLESS POSSIBILITIES.</span></footer>
-    <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{revealed && fortune ? `Your fortune for today: ${fortune.text}${copied ? ' Copied to clipboard.' : ''}` : ''}</div>
+    <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{revealed && fortune ? `Your ${extraFortune ? 'extra ' : ''}fortune for today: ${fortune.text}${copied ? ' Copied to clipboard.' : ''}` : choosingBonus ? 'Choose a cookie for your one extra fortune today.' : ''}</div>
   </div>;
 }

@@ -12,6 +12,7 @@ export interface SceneProps {
   visible: boolean;
   onChoose: (index: number) => void;
   onReveal: () => void;
+  onCrack: () => void;
   onFailure: () => void;
   onReady: () => void;
   hovered: number | null;
@@ -156,6 +157,7 @@ function World(props: SceneProps) {
   const progress = useRef(props.phase === 'revealed' ? 3.2 : 0);
   const elapsed = useRef(0);
   const hasRevealed = useRef(false);
+  const hasCracked = useRef(false);
   const model = useCookieModel();
   useEffect(() => props.onReady(), [props.onReady]);
   useEffect(() => {
@@ -166,6 +168,7 @@ function World(props: SceneProps) {
   useEffect(() => {
     elapsed.current = 0;
     hasRevealed.current = false;
+    hasCracked.current = false;
     progress.current = props.phase === 'revealed' ? 3.2 : 0;
   }, [props.phase]);
 
@@ -173,6 +176,10 @@ function World(props: SceneProps) {
     if (props.phase === 'opening') {
       elapsed.current += Math.min(delta, 0.05);
       progress.current = props.reducedMotion ? 3.2 : elapsed.current;
+      if (progress.current >= 1.08 && !hasCracked.current) {
+        hasCracked.current = true;
+        props.onCrack();
+      }
       if (progress.current >= 3.05 && !hasRevealed.current) {
         hasRevealed.current = true;
         props.onReveal();
