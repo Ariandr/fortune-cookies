@@ -255,7 +255,7 @@ export function App() {
           <div className="fortune-paper" ref={paper} tabIndex={revealed ? -1 : undefined} aria-label={extraFortune ? 'Your extra fortune for today' : 'Your fortune for today'}>
             <div className="paper-topline"><span>{extraFortune ? 'YOUR EXTRA FORTUNE' : 'YOUR LITTLE FORTUNE'}</span><Star /></div>
             <p className="fortune-text">{fortune?.text}</p>
-            <div className="paper-bottomline"><span>KEEP A LITTLE HOPE CLOSE.</span><span>No. {fortune?.id}</span></div>
+            <div className="paper-bottomline"><span>KEEP A LITTLE HOPE CLOSE.</span></div>
           </div>
           <div className="fortune-actions">
             <span className="fortune-date">{date} <span>·</span> yours for today</span>
@@ -274,7 +274,7 @@ export function App() {
 
       <div className="ritual-instruction">
         {revealed && todayFortunes.length === 1 ? <>
-          <button className="extra-fortune-button" onClick={chooseOneMore}>Want one more? <span aria-hidden="true">↗</span></button>
+          <button className="extra-fortune-button" onClick={chooseOneMore}>Want one more?</button>
           <span>ONE EXTRA FORTUNE, ONCE A DAY</span>
         </> : <>
         <div className="instruction-icon" aria-hidden="true">{revealed ? <Star/> : <svg width="24" height="27" viewBox="0 0 24 27" fill="none"><path d="M9 16V6a2 2 0 0 1 4 0v7l1-2c1-2 3-1 3 1 2-1 3 0 3 2v5c0 3-2 5-3 6H9l-6-8c-1-2 1-3 3-1l3 3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/><path d="m4 4 2 1m11-3-1 2M10 0v2" stroke="currentColor" strokeLinecap="round"/></svg>}</div>
